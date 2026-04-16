@@ -1,2 +1,19 @@
-# TIT601540_FYP
-“Automation of Indoor Logistics using Smart Delivery Robot” is a project that develops an autonomous robot for efficient item delivery in indoor spaces like offices and hospitals. It uses sensors, and path planning to navigate, avoid obstacles, and reduce human effort.
+# Hello World
+
+A new Flutter project created with FlutLab - https://flutlab.io
+
+## Getting Started
+
+A few resources to get you started if this is your first Flutter project:
+
+- https://flutter.dev/docs/get-started/codelab
+- https://flutter.dev/docs/cookbook
+
+For help getting started with Flutter, view our
+https://flutter.dev/docs, which offers tutorials,
+samples, guidance on mobile development, and a full API reference.
+
+## Getting Started: FlutLab - Flutter Online IDE
+
+- How to use FlutLab? Please, view our https://flutlab.io/docs
+- Join the discussion and conversation on https://flutlab.io/residents
