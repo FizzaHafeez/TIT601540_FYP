@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'dart:typed_data';
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
 
 void main() {
   runApp(const NavBotApp());
@@ -9,44 +12,78 @@ class NavBotApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'NavBot',
-      initialRoute: '/login',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1F4E8C),
-          brightness: Brightness.light,
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF5F9FF),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: BorderSide(color: Colors.grey.shade300),
+    return ValueListenableBuilder<bool>(
+      valueListenable: NavBotSettings.darkMode,
+      builder: (context, isDark, _) {
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'NavBot',
+          initialRoute: '/login',
+          themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF1F4E8C),
+              brightness: Brightness.light,
+            ),
+            scaffoldBackgroundColor: const Color(0xFFF5F9FF),
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide:
+                    const BorderSide(color: Color(0xFF1F4E8C), width: 1.5),
+              ),
+            ),
           ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: BorderSide(color: Colors.grey.shade300),
+          darkTheme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF1F4E8C),
+              brightness: Brightness.dark,
+            ),
+            scaffoldBackgroundColor: const Color(0xFF121212),
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: const Color(0xFF1E1E1E),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide(color: Colors.grey.shade700),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide(color: Colors.grey.shade700),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide:
+                    const BorderSide(color: Color(0xFF00BCD4), width: 1.5),
+              ),
+            ),
           ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: const BorderSide(color: Color(0xFF1F4E8C), width: 1.5),
-          ),
-        ),
-      ),
-      routes: {
-        '/login': (context) => const LoginScreen(),
-        '/dashboard': (context) => const DashboardScreen(),
-        '/createDelivery': (context) => const CreateDeliveryScreen(),
-        '/tracking': (context) => const TrackingScreen(),
-        '/profile': (context) => const ProfileScreen(),
-        '/about': (context) => const AboutScreen(),
-        '/deliveryComplete': (context) => const DeliveryCompleteScreen(),
+          routes: {
+            '/login': (context) => const LoginScreen(),
+            '/dashboard': (context) => const DashboardScreen(),
+            '/createDelivery': (context) => const CreateDeliveryScreen(),
+            '/tracking': (context) => const TrackingScreen(),
+            '/profile': (context) => const ProfileScreen(),
+            '/about': (context) => const AboutScreen(),
+            '/deliveryComplete': (context) => const DeliveryCompleteScreen(),
+          },
+        );
       },
     );
   }
@@ -58,6 +95,11 @@ class NavBotSession {
   static String userName = '';
   static String userEmail = '';
   static bool isLoggedIn = false;
+  static final ValueNotifier<Uint8List?> profileImageBytes =
+      ValueNotifier(null);
+  static final ValueNotifier<String?> profileEmoji = ValueNotifier(null);
+  static final ValueNotifier<Uint8List?> backgroundImageBytes =
+      ValueNotifier(null);
 }
 
 // ─── Global data + delivery history ─────────────────────────────────────────
@@ -87,6 +129,13 @@ class NavBotData {
     robotStatus = 'Moving';
     activeStep = 'Leaving $pickupLocation';
     eta = '8 min';
+    NavBotStore.addNotification(
+      icon: Icons.smart_toy_rounded,
+      color: const Color(0xFF1F4E8C),
+      title: 'Delivery Started',
+      subtitle:
+          'NavBot is heading from $pickupLocation to $destinationLocation.',
+    );
     _runTick();
   }
 
@@ -124,6 +173,19 @@ class NavBotData {
         isSimulationRunning = false;
         completedDeliveries += 1;
         progressNotifier.value = 1.0;
+        NavBotStore.addNotification(
+          icon: Icons.check_circle_rounded,
+          color: Colors.green,
+          title: 'Delivery Completed',
+          subtitle: 'Package delivered to $destinationLocation successfully.',
+        );
+        NavBotStore.addHistory(DeliveryRecord(
+          from: pickupLocation,
+          to: destinationLocation,
+          package: packageDetails.isEmpty ? 'No details' : packageDetails,
+          status: 'Completed',
+          time: DateTime.now(),
+        ));
         _tickCallback?.call();
       } else {
         _runTick();
@@ -135,6 +197,12 @@ class NavBotData {
     isSimulationRunning = false;
     robotStatus = 'Stopped';
     activeStep = 'Robot stopped manually';
+    NavBotStore.addNotification(
+      icon: Icons.stop_circle_rounded,
+      color: Colors.red,
+      title: 'Delivery Stopped',
+      subtitle: 'NavBot was manually stopped during delivery.',
+    );
   }
 
   static void resumeSimulation() {
@@ -161,7 +229,77 @@ class NavBotData {
   }
 }
 
-// ─── Shared AppBar ────────────────────────────────────────────────────────────
+// ─── Global settings ──────────────────────────────────────────────────────────
+
+class NavBotSettings {
+  static final ValueNotifier<bool> darkMode = ValueNotifier(false);
+  static final ValueNotifier<bool> notifications = ValueNotifier(true);
+  static final ValueNotifier<bool> sound = ValueNotifier(true);
+  static final ValueNotifier<bool> vibration = ValueNotifier(false);
+  static final ValueNotifier<bool> autoTrack = ValueNotifier(true);
+}
+
+// ─── Delivery history entry ───────────────────────────────────────────────────
+
+class DeliveryRecord {
+  final String from;
+  final String to;
+  final String package;
+  final String status;
+  final DateTime time;
+  DeliveryRecord({
+    required this.from,
+    required this.to,
+    required this.package,
+    required this.status,
+    required this.time,
+  });
+}
+
+// ─── Notification entry ───────────────────────────────────────────────────────
+
+class NavNotification {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+  final DateTime time;
+  NavNotification({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+    required this.time,
+  });
+}
+
+// ─── Global history + notifications store ────────────────────────────────────
+
+class NavBotStore {
+  static final List<DeliveryRecord> history = [];
+  static final ValueNotifier<List<NavNotification>> notifications =
+      ValueNotifier([]);
+
+  static void addNotification(
+      {required IconData icon,
+      required Color color,
+      required String title,
+      required String subtitle}) {
+    notifications.value = [
+      NavNotification(
+          icon: icon,
+          color: color,
+          title: title,
+          subtitle: subtitle,
+          time: DateTime.now()),
+      ...notifications.value,
+    ];
+  }
+
+  static void addHistory(DeliveryRecord record) {
+    history.insert(0, record);
+  }
+}
 
 PreferredSizeWidget buildNavBotAppBar(
   BuildContext context, {
@@ -235,9 +373,9 @@ Widget _statusBadge(String status) {
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
     decoration: BoxDecoration(
-      color: color.withOpacity(0.12),
+      color: color.withValues(alpha: 0.12),
       borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: color.withOpacity(0.4)),
+      border: Border.all(color: color.withValues(alpha: 0.4)),
     ),
     child: Row(
       mainAxisSize: MainAxisSize.min,
@@ -474,9 +612,11 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
+// LAB 9: changed to TickerProviderStateMixin because TabController needs a second ticker
 class _DashboardScreenState extends State<DashboardScreen>
-    with SingleTickerProviderStateMixin {
-  int _selectedIndex = 0;
+    with TickerProviderStateMixin {
+  // LAB 9: TabController added
+  late TabController _tabController;
 
   late AnimationController _controller;
   late Animation<double> _fade;
@@ -485,6 +625,15 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void initState() {
     super.initState();
+
+    // LAB 9: initialise TabController with 3 tabs
+    _tabController = TabController(vsync: this, length: 3);
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) {
+        // optional: print('Tab changed: ${_tabController.index}');
+      }
+    });
+
     _controller = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900))
       ..forward();
@@ -510,12 +659,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void dispose() {
     NavBotData.progressNotifier.removeListener(_onProgress);
+    _tabController.dispose(); // LAB 9: dispose TabController
     _controller.dispose();
     super.dispose();
   }
 
   void _handleBottomNav(int index) {
-    setState(() => _selectedIndex = index);
     if (index == 0) {
       Navigator.pushReplacementNamed(context, '/dashboard');
     } else if (index == 1) {
@@ -523,6 +672,44 @@ class _DashboardScreenState extends State<DashboardScreen>
     } else if (index == 2) {
       Navigator.pushNamed(context, '/profile');
     }
+  }
+
+  Widget _drawerTile(
+    BuildContext context, {
+    required IconData icon,
+    required Color color,
+    required String title,
+    required VoidCallback onTap,
+    bool active = false,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      decoration: BoxDecoration(
+        color: active ? color.withValues(alpha: 0.08) : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        leading: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: color, size: 20),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(
+            fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+            color: active ? color : null,
+            fontSize: 14,
+          ),
+        ),
+        onTap: onTap,
+      ),
+    );
   }
 
   Widget _heroCard() {
@@ -580,7 +767,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.14),
+          color: Colors.white.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(14),
         ),
         child: Column(
@@ -629,7 +816,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               width: 54,
               height: 54,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.18),
+                color: Colors.white.withValues(alpha: 0.18),
                 borderRadius: BorderRadius.circular(18),
               ),
               child: Icon(icon, color: Colors.white, size: 28),
@@ -680,7 +867,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.15),
+                    color: Colors.green.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.smart_toy_rounded,
@@ -731,22 +918,281 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: buildNavBotAppBar(
-        context,
-        title: 'Dashboard',
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.info_outline),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                  fullscreenDialog: true,
-                  builder: (context) => const AboutScreen()),
+      // ── LAB 9: Left Drawer — enhanced
+      drawer: Drawer(
+        child: Column(
+          children: [
+            ValueListenableBuilder<Uint8List?>(
+              valueListenable: NavBotSession.backgroundImageBytes,
+              builder: (context, bgBytes, _) {
+                return UserAccountsDrawerHeader(
+                  margin: EdgeInsets.zero,
+                  currentAccountPicture: ValueListenableBuilder<Uint8List?>(
+                    valueListenable: NavBotSession.profileImageBytes,
+                    builder: (context, imgBytes, _) {
+                      return ValueListenableBuilder<String?>(
+                        valueListenable: NavBotSession.profileEmoji,
+                        builder: (context, emoji, _) {
+                          return CircleAvatar(
+                            backgroundColor: Colors.white,
+                            backgroundImage:
+                                imgBytes != null ? MemoryImage(imgBytes) : null,
+                            child: imgBytes == null
+                                ? (emoji != null
+                                    ? Text(emoji,
+                                        style: const TextStyle(fontSize: 32))
+                                    : Text(
+                                        NavBotSession.userName.isEmpty
+                                            ? 'N'
+                                            : NavBotSession.userName[0]
+                                                .toUpperCase(),
+                                        style: const TextStyle(
+                                            fontSize: 28,
+                                            fontWeight: FontWeight.w900,
+                                            color: Color(0xFF1F4E8C)),
+                                      ))
+                                : null,
+                          );
+                        },
+                      );
+                    },
+                  ),
+                  accountName: Row(
+                    children: [
+                      Text(
+                        NavBotSession.userName.isEmpty
+                            ? 'NavBot User'
+                            : NavBotSession.userName,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800, fontSize: 16),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: NavBotData.robotStatus == 'Moving'
+                              ? Colors.green
+                              : NavBotData.robotStatus == 'Completed'
+                                  ? Colors.blue
+                                  : NavBotData.robotStatus == 'Stopped'
+                                      ? Colors.red
+                                      : Colors.orange,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          NavBotData.robotStatus,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                  accountEmail: Text(
+                    NavBotSession.userEmail.isEmpty
+                        ? 'user@navbot.com'
+                        : NavBotSession.userEmail,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: bgBytes == null
+                        ? const LinearGradient(
+                            colors: [Color(0xFF1F4E8C), Color(0xFF00BCD4)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : null,
+                    image: bgBytes != null
+                        ? DecorationImage(
+                            image: MemoryImage(bgBytes),
+                            fit: BoxFit.cover,
+                            colorFilter: ColorFilter.mode(
+                              Colors.black.withValues(alpha: 0.30),
+                              BlendMode.darken,
+                            ),
+                          )
+                        : null,
+                  ),
+                );
+              },
             ),
+            if (NavBotData.requestSent && !NavBotData.deliveryCompleted)
+              Container(
+                margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.green.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.smart_toy_rounded,
+                            color: Colors.green, size: 16),
+                        const SizedBox(width: 6),
+                        const Text('Delivery in progress',
+                            style: TextStyle(
+                                color: Colors.green,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12)),
+                        const Spacer(),
+                        Text(
+                          '${(NavBotData.progressValue * 100).toInt()}%',
+                          style: const TextStyle(
+                              color: Colors.green,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 12),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: NavBotData.progressValue,
+                        minHeight: 6,
+                        backgroundColor: Colors.green.shade100,
+                        valueColor: const AlwaysStoppedAnimation(Colors.green),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.only(top: 12),
+                children: [
+                  _drawerTile(
+                    context,
+                    icon: Icons.home_rounded,
+                    color: const Color(0xFF1F4E8C),
+                    title: 'Home',
+                    active: true,
+                    onTap: () => Navigator.pop(context),
+                  ),
+                  _drawerTile(
+                    context,
+                    icon: Icons.history_rounded,
+                    color: const Color(0xFF00BCD4),
+                    title: 'History',
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => const HistoryScreen()),
+                      );
+                    },
+                  ),
+                  _drawerTile(
+                    context,
+                    icon: Icons.notifications_rounded,
+                    color: Colors.orange,
+                    title: 'Notifications',
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => const NotificationsScreen()),
+                      );
+                    },
+                  ),
+                  _drawerTile(
+                    context,
+                    icon: Icons.settings_rounded,
+                    color: Colors.grey,
+                    title: 'Settings',
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => const SettingsScreen()),
+                      );
+                    },
+                  ),
+                  _drawerTile(
+                    context,
+                    icon: Icons.info_outline_rounded,
+                    color: Colors.deepPurple,
+                    title: 'About',
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.pushNamed(context, '/about');
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            _drawerTile(
+              context,
+              icon: Icons.logout_rounded,
+              color: Colors.red,
+              title: 'Logout',
+              onTap: () {
+                NavBotSession.userName = '';
+                NavBotSession.userEmail = '';
+                NavBotSession.isLoggedIn = false;
+                Navigator.pushNamedAndRemoveUntil(
+                    context, '/login', (route) => false);
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12, top: 4),
+              child: Text(
+                'NavBot v1.0.0',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+              ),
+            ),
+          ],
+        ),
+      ),
+
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        elevation: 0,
+        centerTitle: true,
+        // LAB 9: Drawer menu icon on the left
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu_rounded, color: Color(0xFF163A63)),
+            onPressed: () => Scaffold.of(context).openDrawer(),
           ),
-          IconButton(
-            onPressed: () => Navigator.pushNamed(context, '/profile'),
-            icon: const Icon(Icons.account_circle_outlined),
+        ),
+        title: const Text('Dashboard',
+            style: TextStyle(
+                color: Color(0xFF163A63), fontWeight: FontWeight.w800)),
+        // Logo on the right side
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: GestureDetector(
+              onTap: () =>
+                  Navigator.pushReplacementNamed(context, '/dashboard'),
+              child: Hero(
+                tag: 'navbot_logo',
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEAF4FF),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Image.asset(
+                    'navbot_app/assets/images/navbot_logo.png',
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -785,7 +1231,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 10, vertical: 6),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.2),
+                                color: Colors.white.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
@@ -810,27 +1256,32 @@ class _DashboardScreenState extends State<DashboardScreen>
           ),
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: _handleBottomNav,
-        selectedItemColor: const Color(0xFF1F4E8C),
-        unselectedItemColor: Colors.grey,
-        backgroundColor: Colors.white,
-        elevation: 8,
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(
-              icon: Icon(Icons.home_rounded), label: 'Home'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.add_circle_outline_rounded), label: 'Add'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.person_rounded), label: 'Profile'),
+      // ── LAB 9: TabBar added — kept alongside existing BottomNavigationBar
+      // structure: TabBar sits on top of BottomNavigationBar inside a Column
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // LAB 9: TabBar with TabController
+          SafeArea(
+            bottom: false,
+            child: TabBar(
+              controller: _tabController,
+              labelColor: const Color(0xFF1F4E8C),
+              unselectedLabelColor: Colors.grey,
+              indicatorColor: const Color(0xFF1F4E8C),
+              tabs: const [
+                Tab(icon: Icon(Icons.home_rounded), text: 'Home'),
+                Tab(icon: Icon(Icons.add_circle_outline_rounded), text: 'Add'),
+                Tab(icon: Icon(Icons.person_rounded), text: 'Profile'),
+              ],
+              onTap: _handleBottomNav,
+            ),
+          ),
         ],
       ),
     );
   }
 }
-
 // ═════════════════════════════════════════════════════════════════════════════
 // CREATE DELIVERY SCREEN
 // ═════════════════════════════════════════════════════════════════════════════
@@ -883,6 +1334,13 @@ class _CreateDeliveryScreenState extends State<CreateDeliveryScreen>
     NavBotData.progressNotifier.value = 0.0;
     NavBotData.totalDeliveries += 1;
     NavBotData.startGlobalSimulation();
+    NavBotStore.addNotification(
+      icon: Icons.local_shipping_rounded,
+      color: const Color(0xFF00BCD4),
+      title: 'New Delivery Request',
+      subtitle:
+          'Delivery created from $_pickupLocation to $_destinationLocation.',
+    );
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1175,7 +1633,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1F4E8C).withOpacity(0.1),
+                            color:
+                                const Color(0xFF1F4E8C).withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(Icons.smart_toy_rounded,
@@ -1240,7 +1699,7 @@ class _TrackingScreenState extends State<TrackingScreen>
             width: 52,
             height: 52,
             decoration: BoxDecoration(
-                color: color.withOpacity(0.12),
+                color: color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(16)),
             child: Icon(icon, color: color),
           ),
@@ -1413,7 +1872,7 @@ class _DeliveryCompleteScreenState extends State<DeliveryCompleteScreen>
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF1F4E8C).withOpacity(0.3),
+                          color: const Color(0xFF1F4E8C).withValues(alpha: 0.3),
                           blurRadius: 30,
                           offset: const Offset(0, 15),
                         ),
@@ -1530,7 +1989,7 @@ class _DeliveryCompleteScreenState extends State<DeliveryCompleteScreen>
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
+              color: color.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12)),
           child: Icon(icon, color: color, size: 22),
         ),
@@ -1559,8 +2018,46 @@ class _DeliveryCompleteScreenState extends State<DeliveryCompleteScreen>
 // PROFILE SCREEN
 // ═════════════════════════════════════════════════════════════════════════════
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  // ── emoji list ────────────────────────────────────────────────────────────
+  static const List<String> _emojis = [
+    '😀',
+    '😎',
+    '🤖',
+    '👨‍💻',
+    '👩‍💻',
+    '🧑‍🚀',
+    '👷',
+    '🦾',
+    '🐱',
+    '🐶',
+    '🦊',
+    '🐼',
+    '🐸',
+    '🦁',
+    '🐯',
+    '🐨',
+    '🦄',
+    '🐲',
+    '🌟',
+    '⚡',
+    '🔥',
+    '🌈',
+    '💎',
+    '🚀',
+    '🛸',
+    '🤩',
+    '😇',
+    '🥷',
+    '🧠',
+    '👑',
+  ];
 
   String _initials(String name) {
     final parts = name.trim().split(' ').where((e) => e.isNotEmpty).toList();
@@ -1569,12 +2066,247 @@ class ProfileScreen extends StatelessWidget {
     return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
   }
 
+  // ── pick profile image from files ─────────────────────────────────────────
+  Future<void> _pickProfileImage() async {
+    final input = html.FileUploadInputElement();
+    input.accept = 'image/*';
+    input.click();
+    await input.onChange.first;
+    if (input.files!.isEmpty) return;
+    final reader = html.FileReader();
+    reader.readAsArrayBuffer(input.files![0]);
+    await reader.onLoad.first;
+    NavBotSession.profileImageBytes.value = reader.result as Uint8List;
+    NavBotSession.profileEmoji.value = null;
+  }
+
+  // ── pick background image from files ─────────────────────────────────────
+  Future<void> _pickBackgroundImage() async {
+    final input = html.FileUploadInputElement();
+    input.accept = 'image/*';
+    input.click();
+    await input.onChange.first;
+    if (input.files!.isEmpty) return;
+    final reader = html.FileReader();
+    reader.readAsArrayBuffer(input.files![0]);
+    await reader.onLoad.first;
+    NavBotSession.backgroundImageBytes.value = reader.result as Uint8List;
+  }
+
+  // ── profile picture bottom sheet ──────────────────────────────────────────
+  void _showProfileOptions() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.85,
+        builder: (context, scrollController) => Column(
+          children: [
+            // handle
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const Text('Profile Picture',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 12),
+            // action tiles
+            ListTile(
+              leading: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1F4E8C).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.photo_library_rounded,
+                    color: Color(0xFF1F4E8C)),
+              ),
+              title: const Text('Choose from Gallery',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('Pick any image from your device'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickProfileImage();
+              },
+            ),
+            ValueListenableBuilder<Uint8List?>(
+              valueListenable: NavBotSession.profileImageBytes,
+              builder: (context, bytes, _) => bytes == null
+                  ? const SizedBox.shrink()
+                  : ListTile(
+                      leading: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: Colors.red.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child:
+                            const Icon(Icons.delete_rounded, color: Colors.red),
+                      ),
+                      title: const Text('Remove Photo',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700, color: Colors.red)),
+                      onTap: () {
+                        Navigator.pop(context);
+                        NavBotSession.profileImageBytes.value = null;
+                      },
+                    ),
+            ),
+            const Divider(),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Or choose an emoji',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: Colors.black54)),
+              ),
+            ),
+            // emoji grid
+            Expanded(
+              child: GridView.builder(
+                controller: scrollController,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 6,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                ),
+                itemCount: _emojis.length,
+                itemBuilder: (context, i) => ValueListenableBuilder<String?>(
+                  valueListenable: NavBotSession.profileEmoji,
+                  builder: (context, selected, _) => GestureDetector(
+                    onTap: () {
+                      NavBotSession.profileEmoji.value = _emojis[i];
+                      NavBotSession.profileImageBytes.value = null;
+                      Navigator.pop(context);
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: selected == _emojis[i]
+                            ? const Color(0xFF1F4E8C).withValues(alpha: 0.15)
+                            : Colors.grey.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: selected == _emojis[i]
+                            ? Border.all(
+                                color: const Color(0xFF1F4E8C), width: 2)
+                            : null,
+                      ),
+                      child: Center(
+                        child: Text(_emojis[i],
+                            style: const TextStyle(fontSize: 28)),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── background picture bottom sheet ───────────────────────────────────────
+  void _showBackgroundOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('Profile Background',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00BCD4).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.wallpaper_rounded,
+                      color: Color(0xFF00BCD4)),
+                ),
+                title: const Text('Choose Background Image',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle:
+                    const Text('Pick any image as your profile background'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickBackgroundImage();
+                },
+              ),
+              ValueListenableBuilder<Uint8List?>(
+                valueListenable: NavBotSession.backgroundImageBytes,
+                builder: (context, bytes, _) => bytes == null
+                    ? const SizedBox.shrink()
+                    : ListTile(
+                        leading: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: Colors.red.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.delete_rounded,
+                              color: Colors.red),
+                        ),
+                        title: const Text('Remove Background',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: Colors.red)),
+                        onTap: () {
+                          Navigator.pop(context);
+                          NavBotSession.backgroundImageBytes.value = null;
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _profileTile(IconData icon, String title, String value) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(22),
         boxShadow: const [
           BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 5))
@@ -1606,7 +2338,7 @@ class ProfileScreen extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.18),
+          color: Colors.white.withValues(alpha: 0.18),
           borderRadius: BorderRadius.circular(14),
         ),
         child: Column(
@@ -1640,52 +2372,155 @@ class ProfileScreen extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Container(
-              padding: const EdgeInsets.all(22),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                    colors: [Color(0xFF1F4E8C), Color(0xFF00BCD4)]),
-                borderRadius: BorderRadius.circular(28),
-              ),
-              child: Column(
-                children: [
-                  CircleAvatar(
-                    radius: 38,
-                    backgroundColor: Colors.white,
-                    child: Text(_initials(userName),
-                        style: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w900,
-                            color: Color(0xFF163A63))),
+            // ── Profile header card ─────────────────────────────────────────
+            ValueListenableBuilder<Uint8List?>(
+              valueListenable: NavBotSession.backgroundImageBytes,
+              builder: (context, bgBytes, _) {
+                return Container(
+                  clipBehavior: Clip.hardEdge,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(28),
+                    gradient: bgBytes == null
+                        ? const LinearGradient(
+                            colors: [Color(0xFF1F4E8C), Color(0xFF00BCD4)])
+                        : null,
+                    image: bgBytes != null
+                        ? DecorationImage(
+                            image: MemoryImage(bgBytes),
+                            fit: BoxFit.cover,
+                            colorFilter: ColorFilter.mode(
+                              Colors.black.withValues(alpha: 0.35),
+                              BlendMode.darken,
+                            ),
+                          )
+                        : null,
                   ),
-                  const SizedBox(height: 12),
-                  Text(userName,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 4),
-                  Text(userEmail,
-                      style: const TextStyle(color: Colors.white70)),
-                  const SizedBox(height: 16),
-                  Row(
+                  child: Stack(
                     children: [
-                      _statChip(
-                          '${NavBotData.totalDeliveries}', 'Total\nDeliveries'),
-                      const SizedBox(width: 10),
-                      _statChip(
-                          '${NavBotData.completedDeliveries}', 'Completed'),
-                      const SizedBox(width: 10),
-                      _statChip(
-                        NavBotData.totalDeliveries == 0
-                            ? '0%'
-                            : '${((NavBotData.completedDeliveries / NavBotData.totalDeliveries) * 100).toInt()}%',
-                        'Success\nRate',
+                      Padding(
+                        padding: const EdgeInsets.all(22),
+                        child: Column(
+                          children: [
+                            // Profile picture
+                            GestureDetector(
+                              onTap: _showProfileOptions,
+                              child: Stack(
+                                children: [
+                                  ValueListenableBuilder<Uint8List?>(
+                                    valueListenable:
+                                        NavBotSession.profileImageBytes,
+                                    builder: (context, imgBytes, _) {
+                                      return ValueListenableBuilder<String?>(
+                                        valueListenable:
+                                            NavBotSession.profileEmoji,
+                                        builder: (context, emoji, _) {
+                                          return CircleAvatar(
+                                            radius: 48,
+                                            backgroundColor: Colors.white,
+                                            backgroundImage: imgBytes != null
+                                                ? MemoryImage(imgBytes)
+                                                : null,
+                                            child: imgBytes == null
+                                                ? (emoji != null
+                                                    ? Text(emoji,
+                                                        style: const TextStyle(
+                                                            fontSize: 40))
+                                                    : Text(
+                                                        _initials(userName),
+                                                        style: const TextStyle(
+                                                            fontSize: 28,
+                                                            fontWeight:
+                                                                FontWeight.w900,
+                                                            color: Color(
+                                                                0xFF163A63)),
+                                                      ))
+                                                : null,
+                                          );
+                                        },
+                                      );
+                                    },
+                                  ),
+                                  Positioned(
+                                    bottom: 0,
+                                    right: 0,
+                                    child: Container(
+                                      width: 28,
+                                      height: 28,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF00BCD4),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                            color: Colors.white, width: 2),
+                                      ),
+                                      child: const Icon(Icons.edit_rounded,
+                                          color: Colors.white, size: 14),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(userName,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800)),
+                            const SizedBox(height: 4),
+                            Text(userEmail,
+                                style: const TextStyle(color: Colors.white70)),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                _statChip('${NavBotData.totalDeliveries}',
+                                    'Total\nDeliveries'),
+                                const SizedBox(width: 10),
+                                _statChip('${NavBotData.completedDeliveries}',
+                                    'Completed'),
+                                const SizedBox(width: 10),
+                                _statChip(
+                                  NavBotData.totalDeliveries == 0
+                                      ? '0%'
+                                      : '${((NavBotData.completedDeliveries / NavBotData.totalDeliveries) * 100).toInt()}%',
+                                  'Success\nRate',
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      // ── Change background button (top right) ───────────────
+                      Positioned(
+                        top: 12,
+                        right: 12,
+                        child: GestureDetector(
+                          onTap: _showBackgroundOptions,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.35),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.wallpaper_rounded,
+                                    color: Colors.white, size: 14),
+                                SizedBox(width: 4),
+                                Text('Background',
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                ],
-              ),
+                );
+              },
             ),
             const SizedBox(height: 16),
             _profileTile(Icons.person_rounded, 'Name', userName),
@@ -1703,6 +2538,9 @@ class ProfileScreen extends StatelessWidget {
                   NavBotSession.userName = '';
                   NavBotSession.userEmail = '';
                   NavBotSession.isLoggedIn = false;
+                  NavBotSession.profileImageBytes.value = null;
+                  NavBotSession.profileEmoji.value = null;
+                  NavBotSession.backgroundImageBytes.value = null;
                   Navigator.pushNamedAndRemoveUntil(
                       context, '/login', (route) => false);
                 },
@@ -1711,6 +2549,419 @@ class ProfileScreen extends StatelessWidget {
                     padding: EdgeInsets.symmetric(vertical: 14),
                     child: Text('Logout')),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// HISTORY SCREEN
+// ═════════════════════════════════════════════════════════════════════════════
+
+class HistoryScreen extends StatelessWidget {
+  const HistoryScreen({super.key});
+
+  String _formatTime(DateTime t) {
+    final now = DateTime.now();
+    final diff = now.difference(t);
+    if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+    if (diff.inHours < 24) return '${diff.inHours} hr ago';
+    return '${t.day}/${t.month}/${t.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final history = NavBotStore.history;
+    return Scaffold(
+      appBar: buildNavBotAppBar(context, title: 'History', showBack: true),
+      body: SafeArea(
+        child: history.isEmpty
+            ? const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.history_rounded,
+                        size: 64, color: Colors.black26),
+                    SizedBox(height: 12),
+                    Text('No delivery history yet',
+                        style: TextStyle(color: Colors.black45, fontSize: 16)),
+                    SizedBox(height: 6),
+                    Text('Completed deliveries will\nappear here.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.black38, fontSize: 13)),
+                  ],
+                ),
+              )
+            : ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: history.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final r = history[index];
+                  final isCompleted = r.status == 'Completed';
+                  return Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardColor,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: const [
+                        BoxShadow(
+                            color: Colors.black12,
+                            blurRadius: 8,
+                            offset: Offset(0, 4))
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: isCompleted
+                                ? Colors.green.withValues(alpha: 0.12)
+                                : Colors.orange.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Icon(
+                            isCompleted
+                                ? Icons.check_circle_rounded
+                                : Icons.cancel_rounded,
+                            color: isCompleted ? Colors.green : Colors.orange,
+                            size: 26,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(r.from,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 14,
+                                          color: Color(0xFF163A63))),
+                                  const Padding(
+                                    padding:
+                                        EdgeInsets.symmetric(horizontal: 6),
+                                    child: Icon(Icons.arrow_forward_rounded,
+                                        size: 14, color: Colors.black38),
+                                  ),
+                                  Text(r.to,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 14,
+                                          color: Color(0xFF163A63))),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(r.package,
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Colors.black54),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: isCompleted
+                                    ? Colors.green.withValues(alpha: 0.12)
+                                    : Colors.orange.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(r.status,
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: isCompleted
+                                          ? Colors.green
+                                          : Colors.orange)),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(_formatTime(r.time),
+                                style: const TextStyle(
+                                    fontSize: 11, color: Colors.black38)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+      ),
+    );
+  }
+}
+
+class NotificationsScreen extends StatelessWidget {
+  const NotificationsScreen({super.key});
+
+  String _timeAgo(DateTime time) {
+    final diff = DateTime.now().difference(time);
+    if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+    if (diff.inHours < 24) return '${diff.inHours} hr ago';
+    return '${diff.inDays} day(s) ago';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: buildNavBotAppBar(
+        context,
+        title: 'Notifications',
+        showBack: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_sweep_rounded),
+            tooltip: 'Clear all',
+            onPressed: () {
+              NavBotStore.notifications.value = [];
+            },
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: ValueListenableBuilder<List<NavNotification>>(
+          valueListenable: NavBotStore.notifications,
+          builder: (context, notifications, _) {
+            if (notifications.isEmpty) {
+              return const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.notifications_off_rounded,
+                        size: 64, color: Colors.black26),
+                    SizedBox(height: 12),
+                    Text('No notifications yet',
+                        style: TextStyle(color: Colors.black45, fontSize: 16)),
+                    SizedBox(height: 6),
+                    Text(
+                        'Notifications will appear here when\ndeliveries are created or updated.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.black38, fontSize: 13)),
+                  ],
+                ),
+              );
+            }
+            return ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: notifications.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                final n = notifications[index];
+                return Dismissible(
+                  key: Key(n.time.toString() + index.toString()),
+                  direction: DismissDirection.endToStart,
+                  background: Container(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 20),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade100,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Icon(Icons.delete_rounded, color: Colors.red),
+                  ),
+                  onDismissed: (_) {
+                    final updated = List<NavNotification>.from(
+                        NavBotStore.notifications.value)
+                      ..removeAt(index);
+                    NavBotStore.notifications.value = updated;
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardColor,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: const [
+                        BoxShadow(
+                            color: Colors.black12,
+                            blurRadius: 8,
+                            offset: Offset(0, 4))
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: n.color.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Icon(n.icon, color: n.color, size: 24),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(n.title,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 14,
+                                      color: Color(0xFF163A63))),
+                              const SizedBox(height: 4),
+                              Text(n.subtitle,
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Colors.black54)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(_timeAgo(n.time),
+                            style: const TextStyle(
+                                fontSize: 11, color: Colors.black38)),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SETTINGS SCREEN
+// ═════════════════════════════════════════════════════════════════════════════
+
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
+  Widget _settingsTile({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required ValueNotifier<bool> notifier,
+  }) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: notifier,
+      builder: (context, value, _) {
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: const [
+              BoxShadow(
+                  color: Colors.black12, blurRadius: 8, offset: Offset(0, 4))
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: color, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 14)),
+                    const SizedBox(height: 2),
+                    Text(subtitle,
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.black45)),
+                  ],
+                ),
+              ),
+              Switch(
+                value: value,
+                onChanged: (v) => notifier.value = v,
+                activeColor: const Color(0xFF1F4E8C),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: buildNavBotAppBar(context, title: 'Settings', showBack: true),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 10),
+              child: Text('Notifications',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black45)),
+            ),
+            _settingsTile(
+              icon: Icons.notifications_rounded,
+              color: Colors.orange,
+              title: 'Push Notifications',
+              subtitle: 'Receive delivery updates',
+              notifier: NavBotSettings.notifications,
+            ),
+            _settingsTile(
+              icon: Icons.volume_up_rounded,
+              color: const Color(0xFF00BCD4),
+              title: 'Sound',
+              subtitle: 'Play sound on alerts',
+              notifier: NavBotSettings.sound,
+            ),
+            _settingsTile(
+              icon: Icons.vibration_rounded,
+              color: const Color(0xFF7B61FF),
+              title: 'Vibration',
+              subtitle: 'Vibrate on alerts',
+              notifier: NavBotSettings.vibration,
+            ),
+            const SizedBox(height: 8),
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 10),
+              child: Text('App',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black45)),
+            ),
+            _settingsTile(
+              icon: Icons.dark_mode_rounded,
+              color: const Color(0xFF163A63),
+              title: 'Dark Mode',
+              subtitle: 'Switch to dark theme',
+              notifier: NavBotSettings.darkMode,
+            ),
+            _settingsTile(
+              icon: Icons.track_changes_rounded,
+              color: Colors.green,
+              title: 'Auto Track',
+              subtitle: 'Auto open tracking on delivery start',
+              notifier: NavBotSettings.autoTrack,
             ),
           ],
         ),
@@ -1830,7 +3081,6 @@ class AboutScreen extends StatelessWidget {
             _infoCard(
               icon: Icons.group_rounded,
               title: 'Project Team — Group 3',
-              // ← UPDATED with all 5 names
               value:
                   'Zainab  •Fizza  •Danish  •Hafiz Zain ul Abidin  •Hammad Awan',
               color: Colors.green,
@@ -1902,7 +3152,7 @@ class AboutScreen extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-                color: color.withOpacity(0.12),
+                color: color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(14)),
             child: Icon(icon, color: color),
           ),
@@ -1946,7 +3196,7 @@ class AboutScreen extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-                color: color.withOpacity(0.12),
+                color: color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(14)),
             child: Icon(icon, color: color),
           ),
