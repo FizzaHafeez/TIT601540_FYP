@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:typed_data';
+import 'api_users_screen.dart';
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
 
@@ -76,15 +77,12 @@ class NavBotApp extends StatelessWidget {
           ),
           routes: {
             '/login': (context) => const LoginScreen(),
-            '/signup': (context) => const SignupScreen(),
             '/dashboard': (context) => const DashboardScreen(),
             '/createDelivery': (context) => const CreateDeliveryScreen(),
             '/tracking': (context) => const TrackingScreen(),
             '/profile': (context) => const ProfileScreen(),
             '/about': (context) => const AboutScreen(),
             '/deliveryComplete': (context) => const DeliveryCompleteScreen(),
-            '/statsGrid': (context) => const StatsGridScreen(),
-            '/robotFeatures': (context) => const RobotFeaturesScreen(),
           },
         );
       },
@@ -123,12 +121,8 @@ class NavBotData {
   static int totalDeliveries = 0;
   static int completedDeliveries = 0;
 
-  // FIX: Use a public ValueNotifier so all screens can safely listen
   static final ValueNotifier<double> progressNotifier = ValueNotifier(0.0);
-
-  // FIX: Use a public completion notifier instead of a private callback
-  // to avoid double-navigation and tight coupling between screens.
-  static final ValueNotifier<bool> completionNotifier = ValueNotifier(false);
+  static void Function()? _tickCallback;
 
   static void startGlobalSimulation() {
     if (isSimulationRunning) return;
@@ -193,9 +187,7 @@ class NavBotData {
           status: 'Completed',
           time: DateTime.now(),
         ));
-        // FIX: Notify via ValueNotifier instead of a private callback,
-        // so only the currently active screen handles navigation once.
-        completionNotifier.value = true;
+        _tickCallback?.call();
       } else {
         _runTick();
       }
@@ -235,10 +227,6 @@ class NavBotData {
     activeStep = 'Waiting for request';
     isSimulationRunning = false;
     progressNotifier.value = 0.0;
-    // FIX: Reset completionNotifier so the next delivery can fire it again.
-    completionNotifier.value = false;
-    // NOTE: totalDeliveries and completedDeliveries are intentionally
-    // NOT reset here — they are session-level counters, not per-delivery.
   }
 }
 
@@ -403,338 +391,6 @@ Widget _statusBadge(String status) {
   );
 }
 
-// ─── In-memory account store ──────────────────────────────────────────────────
-// Stores registered accounts as email → {password, fullName} so signup/login
-// works across screens within the same app session.
-
-class NavBotAccounts {
-  static final Map<String, Map<String, String>> _accounts = {};
-
-  static bool register(String email, String password, String fullName) {
-    final key = email.trim().toLowerCase();
-    if (_accounts.containsKey(key)) return false; // already exists
-    _accounts[key] = {'password': password, 'fullName': fullName};
-    return true;
-  }
-
-  static Map<String, String>? login(String email, String password) {
-    final key = email.trim().toLowerCase();
-    final account = _accounts[key];
-    if (account == null) return null;
-    if (account['password'] != password) return null;
-    return account;
-  }
-
-  static bool exists(String email) =>
-      _accounts.containsKey(email.trim().toLowerCase());
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// SIGNUP SCREEN
-// ═════════════════════════════════════════════════════════════════════════════
-
-class SignupScreen extends StatefulWidget {
-  const SignupScreen({super.key});
-  @override
-  State<SignupScreen> createState() => _SignupScreenState();
-}
-
-class _SignupScreenState extends State<SignupScreen>
-    with SingleTickerProviderStateMixin {
-  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _confirmController = TextEditingController();
-  bool _obscurePassword = true;
-  bool _obscureConfirm = true;
-
-  late AnimationController _controller;
-  late Animation<double> _fade;
-  late Animation<Offset> _slide;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 900))
-      ..forward();
-    _fade = Tween<double>(begin: 0, end: 1).animate(_controller);
-    _slide = Tween<Offset>(begin: const Offset(0, 0.06), end: Offset.zero)
-        .animate(
-            CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _nameController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _confirmController.dispose();
-    super.dispose();
-  }
-
-  void _signup() {
-    if (!_formKey.currentState!.validate()) return;
-    final email = _emailController.text.trim();
-    final password = _passwordController.text;
-    final fullName = _nameController.text.trim();
-
-    final registered = NavBotAccounts.register(email, password, fullName);
-    if (!registered) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Row(children: [
-            Icon(Icons.error_rounded, color: Colors.white),
-            SizedBox(width: 10),
-            Text('An account with this email already exists.'),
-          ]),
-          backgroundColor: Colors.red.shade600,
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        ),
-      );
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Row(children: [
-          Icon(Icons.check_circle_rounded, color: Colors.white),
-          SizedBox(width: 10),
-          Expanded(child: Text('Account created! Please log in.')),
-        ]),
-        backgroundColor: Colors.green.shade600,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-    );
-    // Go back to login, pre-filling the email
-    Navigator.pop(context, email);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFF8FBFF), Color(0xFFEAF4FF), Color(0xFFDCEEFF)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: SafeArea(
-          child: FadeTransition(
-            opacity: _fade,
-            child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: SlideTransition(
-                  position: _slide,
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      children: [
-                        // ── Header ──────────────────────────────────────────
-                        Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFF1F4E8C), Color(0xFF00BCD4)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.circular(24),
-                            boxShadow: const [
-                              BoxShadow(
-                                  color: Colors.black12,
-                                  blurRadius: 16,
-                                  offset: Offset(0, 8))
-                            ],
-                          ),
-                          child: const Icon(Icons.person_add_rounded,
-                              color: Colors.white, size: 40),
-                        ),
-                        const SizedBox(height: 16),
-                        const Text('Create Account',
-                            style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w900,
-                                color: Color(0xFF163A63))),
-                        const SizedBox(height: 6),
-                        const Text('Join NavBot to manage deliveries',
-                            style:
-                                TextStyle(fontSize: 14, color: Colors.black54)),
-                        const SizedBox(height: 28),
-
-                        // ── Form card ────────────────────────────────────────
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(26),
-                            boxShadow: const [
-                              BoxShadow(
-                                  color: Colors.black12,
-                                  blurRadius: 12,
-                                  offset: Offset(0, 5))
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Full name
-                              TextFormField(
-                                controller: _nameController,
-                                textCapitalization: TextCapitalization.words,
-                                decoration: const InputDecoration(
-                                  labelText: 'Full Name',
-                                  prefixIcon: Icon(Icons.badge_rounded),
-                                ),
-                                validator: (v) {
-                                  if (v == null || v.trim().isEmpty)
-                                    return 'Full name required';
-                                  if (v.trim().length < 2)
-                                    return 'Name too short';
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 14),
-
-                              // Email
-                              TextFormField(
-                                controller: _emailController,
-                                keyboardType: TextInputType.emailAddress,
-                                decoration: const InputDecoration(
-                                  labelText: 'Email',
-                                  prefixIcon:
-                                      Icon(Icons.alternate_email_rounded),
-                                ),
-                                validator: (v) {
-                                  if (v == null || v.trim().isEmpty)
-                                    return 'Email required';
-                                  if (!v.contains('@') || !v.contains('.'))
-                                    return 'Enter a valid email';
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 14),
-
-                              // Password
-                              TextFormField(
-                                controller: _passwordController,
-                                obscureText: _obscurePassword,
-                                decoration: InputDecoration(
-                                  labelText: 'Password',
-                                  prefixIcon:
-                                      const Icon(Icons.lock_outline_rounded),
-                                  suffixIcon: IconButton(
-                                    icon: Icon(_obscurePassword
-                                        ? Icons.visibility_off_rounded
-                                        : Icons.visibility_rounded),
-                                    onPressed: () => setState(() =>
-                                        _obscurePassword = !_obscurePassword),
-                                  ),
-                                ),
-                                validator: (v) {
-                                  if (v == null || v.isEmpty)
-                                    return 'Password required';
-                                  if (v.length < 6)
-                                    return 'Minimum 6 characters';
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 14),
-
-                              // Confirm password
-                              TextFormField(
-                                controller: _confirmController,
-                                obscureText: _obscureConfirm,
-                                decoration: InputDecoration(
-                                  labelText: 'Confirm Password',
-                                  prefixIcon: const Icon(Icons.lock_rounded),
-                                  suffixIcon: IconButton(
-                                    icon: Icon(_obscureConfirm
-                                        ? Icons.visibility_off_rounded
-                                        : Icons.visibility_rounded),
-                                    onPressed: () => setState(() =>
-                                        _obscureConfirm = !_obscureConfirm),
-                                  ),
-                                ),
-                                validator: (v) {
-                                  if (v == null || v.isEmpty)
-                                    return 'Please confirm your password';
-                                  if (v != _passwordController.text)
-                                    return 'Passwords do not match';
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 8),
-
-                              // Password hint
-                              Row(
-                                children: [
-                                  Icon(Icons.info_outline_rounded,
-                                      size: 13, color: Colors.grey.shade400),
-                                  const SizedBox(width: 5),
-                                  Text('Minimum 6 characters',
-                                      style: TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.grey.shade400)),
-                                ],
-                              ),
-                              const SizedBox(height: 20),
-
-                              // Sign Up button
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton.icon(
-                                  onPressed: _signup,
-                                  icon: const Icon(Icons.person_add_rounded),
-                                  label: const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 14),
-                                    child: Text('Create Account',
-                                        style: TextStyle(fontSize: 16)),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-
-                        // ── Already have account ─────────────────────────────
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Text('Already have an account?',
-                                style: TextStyle(color: Colors.black54)),
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('Log In',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      color: Color(0xFF1F4E8C))),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ═════════════════════════════════════════════════════════════════════════════
 // LOGIN SCREEN
 // ═════════════════════════════════════════════════════════════════════════════
@@ -751,7 +407,6 @@ class _LoginScreenState extends State<LoginScreen>
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _obscurePassword = true;
-  String? _errorMessage;
 
   late AnimationController _controller;
   late Animation<double> _fade;
@@ -780,43 +435,26 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
-  void _login() {
-    setState(() => _errorMessage = null);
-    if (!_formKey.currentState!.validate()) return;
-
-    final email = _emailController.text.trim();
-    final password = _passwordController.text;
-
-    // No account registered with this email at all
-    if (!NavBotAccounts.exists(email)) {
-      setState(() => _errorMessage =
-          'No account found for this email. Please sign up first.');
-      return;
-    }
-
-    // Account exists — check password
-    final account = NavBotAccounts.login(email, password);
-    if (account == null) {
-      setState(() => _errorMessage = 'Incorrect password. Please try again.');
-      return;
-    }
-
-    // Credentials match — start session
-    NavBotSession.userEmail = email;
-    NavBotSession.userName = account['fullName']!;
-    NavBotSession.isLoggedIn = true;
-    Navigator.pushReplacementNamed(context, '/dashboard');
+  String _extractName(String email) {
+    final base = email.split('@').first.trim();
+    if (base.isEmpty) return 'NavBot User';
+    final cleaned = base.replaceAll(RegExp(r'[._\-0-9]+'), ' ').trim();
+    if (cleaned.isEmpty) return 'NavBot User';
+    return cleaned
+        .split(' ')
+        .where((e) => e.isNotEmpty)
+        .map((e) =>
+            e[0].toUpperCase() +
+            (e.length > 1 ? e.substring(1).toLowerCase() : ''))
+        .join(' ');
   }
 
-  Future<void> _goToSignup() async {
-    // SignupScreen returns the registered email so we can pre-fill it
-    final registeredEmail = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(builder: (_) => const SignupScreen()),
-    );
-    if (registeredEmail != null && mounted) {
-      _emailController.text = registeredEmail;
-    }
+  void _login() {
+    if (!_formKey.currentState!.validate()) return;
+    NavBotSession.userEmail = _emailController.text.trim();
+    NavBotSession.userName = _extractName(_emailController.text.trim());
+    NavBotSession.isLoggedIn = true;
+    Navigator.pushReplacementNamed(context, '/dashboard');
   }
 
   @override
@@ -842,7 +480,6 @@ class _LoginScreenState extends State<LoginScreen>
                     key: _formKey,
                     child: Column(
                       children: [
-                        // ── Logo + title ─────────────────────────────────────
                         ScaleTransition(
                           scale: _scale,
                           child: Column(
@@ -863,7 +500,7 @@ class _LoginScreenState extends State<LoginScreen>
                                   tag: 'navbot_logo',
                                   child: Image.asset(
                                     'navbot_app/assets/images/navbot_logo.png',
-                                    height: 120,
+                                    height: 160,
                                     fit: BoxFit.contain,
                                   ),
                                 ),
@@ -882,10 +519,8 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                         ),
                         const SizedBox(height: 28),
-
-                        // ── Form card ─────────────────────────────────────────
                         Container(
-                          padding: const EdgeInsets.all(20),
+                          padding: const EdgeInsets.all(18),
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(26),
@@ -897,49 +532,9 @@ class _LoginScreenState extends State<LoginScreen>
                             ],
                           ),
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Welcome back',
-                                  style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w900,
-                                      color: Color(0xFF163A63))),
-                              const SizedBox(height: 4),
-                              const Text('Sign in to your account',
-                                  style: TextStyle(
-                                      fontSize: 13, color: Colors.black45)),
-                              const SizedBox(height: 18),
-
-                              // Error banner
-                              if (_errorMessage != null)
-                                Container(
-                                  margin: const EdgeInsets.only(bottom: 14),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 10),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.shade50,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border:
-                                        Border.all(color: Colors.red.shade200),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.error_outline_rounded,
-                                          color: Colors.red.shade600, size: 18),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(_errorMessage!,
-                                            style: TextStyle(
-                                                color: Colors.red.shade700,
-                                                fontSize: 13)),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-
                               TextFormField(
                                 controller: _emailController,
-                                keyboardType: TextInputType.emailAddress,
                                 decoration: const InputDecoration(
                                   labelText: 'Email',
                                   prefixIcon:
@@ -977,7 +572,7 @@ class _LoginScreenState extends State<LoginScreen>
                                   return null;
                                 },
                               ),
-                              const SizedBox(height: 20),
+                              const SizedBox(height: 18),
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton.icon(
@@ -985,100 +580,16 @@ class _LoginScreenState extends State<LoginScreen>
                                   icon: const Icon(Icons.login_rounded),
                                   label: const Padding(
                                     padding: EdgeInsets.symmetric(vertical: 14),
-                                    child: Text('Login',
-                                        style: TextStyle(fontSize: 16)),
+                                    child: Text('Login'),
                                   ),
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-
-                        // ── Divider ───────────────────────────────────────────
-                        Row(
-                          children: [
-                            Expanded(
-                                child: Divider(color: Colors.grey.shade300)),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 12),
-                              child: Text('OR',
-                                  style: TextStyle(
-                                      color: Colors.grey.shade400,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600)),
-                            ),
-                            Expanded(
-                                child: Divider(color: Colors.grey.shade300)),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-
-                        // ── Sign up card ──────────────────────────────────────
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(18),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(22),
-                            border: Border.all(
-                                color: const Color(0xFF1F4E8C)
-                                    .withValues(alpha: 0.25)),
-                            boxShadow: const [
-                              BoxShadow(
-                                  color: Colors.black12,
-                                  blurRadius: 8,
-                                  offset: Offset(0, 4))
-                            ],
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFEAF4FF),
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: const Icon(Icons.person_add_rounded,
-                                    color: Color(0xFF1F4E8C), size: 22),
-                              ),
-                              const SizedBox(width: 14),
-                              const Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text("Don't have an account?",
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            color: Color(0xFF163A63))),
-                                    SizedBox(height: 2),
-                                    Text('Create one — it takes 30 seconds',
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.black45)),
-                                  ],
-                                ),
-                              ),
                               TextButton(
-                                onPressed: _goToSignup,
-                                style: TextButton.styleFrom(
-                                  backgroundColor: const Color(0xFF1F4E8C),
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12)),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 10),
-                                ),
-                                child: const Text('Sign Up',
-                                    style:
-                                        TextStyle(fontWeight: FontWeight.w800)),
-                              ),
+                                  onPressed: () {},
+                                  child: const Text('Signup')),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 16),
                       ],
                     ),
                   ),
@@ -1098,6 +609,7 @@ class _LoginScreenState extends State<LoginScreen>
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
+
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
@@ -1105,7 +617,6 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
   late TabController _tabController;
-
   late AnimationController _controller;
   late Animation<double> _fade;
   late Animation<Offset> _slide;
@@ -1113,26 +624,37 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void initState() {
     super.initState();
+
     _tabController = TabController(vsync: this, length: 3);
 
     _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 900))
-      ..forward();
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..forward();
+
     _fade = Tween<double>(begin: 0, end: 1).animate(_controller);
-    _slide = Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero)
-        .animate(
-            CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.04),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+    );
 
     NavBotData.progressNotifier.addListener(_onProgress);
-    // FIX: Dashboard only rebuilds UI on progress; it does NOT navigate to
-    // deliveryComplete. Navigation is handled solely by TrackingScreen,
-    // which is the active screen during a delivery. This prevents the
-    // double-navigation crash that occurred when both screens listened and
-    // both tried to push '/deliveryComplete' simultaneously.
   }
 
   void _onProgress() {
     if (mounted) setState(() {});
+
+    if (NavBotData.deliveryCompleted && mounted) {
+      NavBotData.progressNotifier.removeListener(_onProgress);
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/deliveryComplete');
+        }
+      });
+    }
   }
 
   @override
@@ -1143,8 +665,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     super.dispose();
   }
 
-  // FIX: Removed the empty indexIsChanging block. _handleBottomNav now
-  // exclusively drives navigation so there is no conflict with TabController.
   void _handleBottomNav(int index) {
     if (index == 0) {
       Navigator.pushReplacementNamed(context, '/dashboard');
@@ -1153,121 +673,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     } else if (index == 2) {
       Navigator.pushNamed(context, '/profile');
     }
-  }
-
-  Widget _drawerTile(
-    BuildContext context, {
-    required IconData icon,
-    required Color color,
-    required String title,
-    required VoidCallback onTap,
-    bool active = false,
-  }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-      decoration: BoxDecoration(
-        color: active ? color.withValues(alpha: 0.08) : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        leading: Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(icon, color: color, size: 20),
-        ),
-        title: Text(
-          title,
-          style: TextStyle(
-            fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-            color: active ? color : null,
-            fontSize: 14,
-          ),
-        ),
-        onTap: onTap,
-      ),
-    );
-  }
-
-  Widget _heroCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-            colors: [Color(0xFF1F4E8C), Color(0xFF00BCD4)]),
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 16, offset: Offset(0, 8))
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Welcome, ${NavBotSession.userName}',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900),
-                ),
-              ),
-              _statusBadge(NavBotData.robotStatus),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Manage your deliveries, create new requests, and track NavBot in real-time.',
-            style: TextStyle(color: Colors.white70, height: 1.4),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              _quickStat(
-                  Icons.smart_toy_rounded, 'Status', NavBotData.robotStatus),
-              const SizedBox(width: 10),
-              _quickStat(
-                  Icons.place_rounded, 'Location', NavBotData.currentLocation),
-              const SizedBox(width: 10),
-              _quickStat(Icons.timer_outlined, 'ETA', NavBotData.eta),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _quickStat(IconData icon, String label, String value) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.14),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: Colors.white70, size: 16),
-            const SizedBox(height: 4),
-            Text(label,
-                style: const TextStyle(color: Colors.white60, fontSize: 10)),
-            Text(value,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12),
-                overflow: TextOverflow.ellipsis),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _actionTile({
@@ -1288,7 +693,10 @@ class _DashboardScreenState extends State<DashboardScreen>
           borderRadius: BorderRadius.circular(24),
           boxShadow: const [
             BoxShadow(
-                color: Colors.black12, blurRadius: 12, offset: Offset(0, 6))
+              color: Colors.black12,
+              blurRadius: 12,
+              offset: Offset(0, 6),
+            )
           ],
         ),
         child: Row(
@@ -1307,92 +715,95 @@ class _DashboardScreenState extends State<DashboardScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 17)),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 17,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text(subtitle, style: const TextStyle(color: Colors.white70)),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(color: Colors.white70),
+                  ),
                 ],
               ),
             ),
-            if (trailing != null)
-              trailing
-            else
-              const Icon(Icons.arrow_forward_ios_rounded,
-                  color: Colors.white, size: 16),
+            trailing ??
+                const Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: Colors.white,
+                  size: 16,
+                ),
           ],
         ),
       ),
     );
   }
 
-  Widget _activeDeliveryBanner() {
-    final pct = (NavBotData.progressValue * 100).toInt();
-    return GestureDetector(
-      onTap: () => Navigator.pushNamed(context, '/tracking'),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.green.shade50,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.green.shade200),
+  Widget _heroCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1F4E8C), Color(0xFF00BCD4)],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.15),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.smart_toy_rounded,
-                      color: Colors.green, size: 22),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Delivery In Progress',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              color: Colors.green)),
-                      Text(
-                        '${NavBotData.currentLocation} → ${NavBotData.destinationLocation}  •  ETA ${NavBotData.eta}',
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.green.shade700),
-                      ),
-                    ],
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 16,
+            offset: Offset(0, 8),
+          )
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Welcome, ${NavBotSession.userName}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
-                Text('$pct%',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        color: Colors.green,
-                        fontSize: 16)),
-                const SizedBox(width: 4),
-                const Icon(Icons.chevron_right_rounded, color: Colors.green),
-              ],
-            ),
-            const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: LinearProgressIndicator(
-                value: NavBotData.progressValue,
-                minHeight: 8,
-                backgroundColor: Colors.green.shade100,
-                valueColor: const AlwaysStoppedAnimation(Colors.green),
               ),
-            ),
-          ],
+              _statusBadge(NavBotData.robotStatus),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Manage your deliveries, create new requests, and track NavBot in real-time.',
+            style: TextStyle(color: Colors.white70, height: 1.4),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _drawerTile(
+    BuildContext context, {
+    required IconData icon,
+    required Color color,
+    required String title,
+    required VoidCallback onTap,
+    bool active = false,
+  }) {
+    return ListTile(
+      leading: Icon(icon, color: color),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontWeight: active ? FontWeight.bold : FontWeight.w500,
         ),
       ),
+      onTap: onTap,
     );
   }
 
@@ -1402,149 +813,38 @@ class _DashboardScreenState extends State<DashboardScreen>
       drawer: Drawer(
         child: Column(
           children: [
-            ValueListenableBuilder<Uint8List?>(
-              valueListenable: NavBotSession.backgroundImageBytes,
-              builder: (context, bgBytes, _) {
-                return UserAccountsDrawerHeader(
-                  margin: EdgeInsets.zero,
-                  currentAccountPicture: ValueListenableBuilder<Uint8List?>(
-                    valueListenable: NavBotSession.profileImageBytes,
-                    builder: (context, imgBytes, _) {
-                      return ValueListenableBuilder<String?>(
-                        valueListenable: NavBotSession.profileEmoji,
-                        builder: (context, emoji, _) {
-                          return CircleAvatar(
-                            backgroundColor: Colors.white,
-                            backgroundImage:
-                                imgBytes != null ? MemoryImage(imgBytes) : null,
-                            child: imgBytes == null
-                                ? (emoji != null
-                                    ? Text(emoji,
-                                        style: const TextStyle(fontSize: 32))
-                                    : Text(
-                                        NavBotSession.userName.isEmpty
-                                            ? 'N'
-                                            : NavBotSession.userName[0]
-                                                .toUpperCase(),
-                                        style: const TextStyle(
-                                            fontSize: 28,
-                                            fontWeight: FontWeight.w900,
-                                            color: Color(0xFF1F4E8C)),
-                                      ))
-                                : null,
-                          );
-                        },
-                      );
-                    },
+            UserAccountsDrawerHeader(
+              accountName: Text(
+                NavBotSession.userName.isEmpty
+                    ? 'NavBot User'
+                    : NavBotSession.userName,
+              ),
+              accountEmail: Text(
+                NavBotSession.userEmail.isEmpty
+                    ? 'user@navbot.com'
+                    : NavBotSession.userEmail,
+              ),
+              currentAccountPicture: CircleAvatar(
+                backgroundColor: Colors.white,
+                child: Text(
+                  NavBotSession.userName.isEmpty
+                      ? 'N'
+                      : NavBotSession.userName[0].toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1F4E8C),
                   ),
-                  accountName: Row(
-                    children: [
-                      Text(
-                        NavBotSession.userName.isEmpty
-                            ? 'NavBot User'
-                            : NavBotSession.userName,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w800, fontSize: 16),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: NavBotData.robotStatus == 'Moving'
-                              ? Colors.green
-                              : NavBotData.robotStatus == 'Completed'
-                                  ? Colors.blue
-                                  : NavBotData.robotStatus == 'Stopped'
-                                      ? Colors.red
-                                      : Colors.orange,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          NavBotData.robotStatus,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ],
-                  ),
-                  accountEmail: Text(
-                    NavBotSession.userEmail.isEmpty
-                        ? 'user@navbot.com'
-                        : NavBotSession.userEmail,
-                  ),
-                  decoration: BoxDecoration(
-                    gradient: bgBytes == null
-                        ? const LinearGradient(
-                            colors: [Color(0xFF1F4E8C), Color(0xFF00BCD4)],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          )
-                        : null,
-                    image: bgBytes != null
-                        ? DecorationImage(
-                            image: MemoryImage(bgBytes),
-                            fit: BoxFit.cover,
-                            colorFilter: ColorFilter.mode(
-                              Colors.black.withValues(alpha: 0.30),
-                              BlendMode.darken,
-                            ),
-                          )
-                        : null,
-                  ),
-                );
-              },
-            ),
-            if (NavBotData.requestSent && !NavBotData.deliveryCompleted)
-              Container(
-                margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.green.shade200),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.smart_toy_rounded,
-                            color: Colors.green, size: 16),
-                        const SizedBox(width: 6),
-                        const Text('Delivery in progress',
-                            style: TextStyle(
-                                color: Colors.green,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 12)),
-                        const Spacer(),
-                        Text(
-                          '${(NavBotData.progressValue * 100).toInt()}%',
-                          style: const TextStyle(
-                              color: Colors.green,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 12),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: LinearProgressIndicator(
-                        value: NavBotData.progressValue,
-                        minHeight: 6,
-                        backgroundColor: Colors.green.shade100,
-                        valueColor: const AlwaysStoppedAnimation(Colors.green),
-                      ),
-                    ),
-                  ],
                 ),
               ),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF1F4E8C), Color(0xFF00BCD4)],
+                ),
+              ),
+            ),
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.only(top: 12),
                 children: [
                   _drawerTile(
                     context,
@@ -1557,14 +857,15 @@ class _DashboardScreenState extends State<DashboardScreen>
                   _drawerTile(
                     context,
                     icon: Icons.history_rounded,
-                    color: const Color(0xFF00BCD4),
+                    color: Colors.blue,
                     title: 'History',
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                            builder: (context) => const HistoryScreen()),
+                          builder: (context) => const HistoryScreen(),
+                        ),
                       );
                     },
                   ),
@@ -1578,28 +879,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                            builder: (context) => const NotificationsScreen()),
+                          builder: (context) => const NotificationsScreen(),
+                        ),
                       );
-                    },
-                  ),
-                  _drawerTile(
-                    context,
-                    icon: Icons.bar_chart_rounded,
-                    color: Colors.teal,
-                    title: 'Stats & Overview',
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.pushNamed(context, '/statsGrid');
-                    },
-                  ),
-                  _drawerTile(
-                    context,
-                    icon: Icons.precision_manufacturing_rounded,
-                    color: const Color(0xFF00BCD4),
-                    title: 'Robot Capabilities',
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.pushNamed(context, '/robotFeatures');
                     },
                   ),
                   _drawerTile(
@@ -1612,7 +894,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                            builder: (context) => const SettingsScreen()),
+                          builder: (context) => const SettingsScreen(),
+                        ),
                       );
                     },
                   ),
@@ -1626,10 +909,25 @@ class _DashboardScreenState extends State<DashboardScreen>
                       Navigator.pushNamed(context, '/about');
                     },
                   ),
+                  _drawerTile(
+                    context,
+                    icon: Icons.cloud_download_rounded,
+                    color: Colors.orange,
+                    title: 'Lab 11 API Users',
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ApiUsersScreen(),
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
-            const Divider(height: 1),
+            const Divider(),
             _drawerTile(
               context,
               icon: Icons.logout_rounded,
@@ -1640,15 +938,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                 NavBotSession.userEmail = '';
                 NavBotSession.isLoggedIn = false;
                 Navigator.pushNamedAndRemoveUntil(
-                    context, '/login', (route) => false);
+                  context,
+                  '/login',
+                  (route) => false,
+                );
               },
-            ),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12, top: 4),
-              child: Text(
-                'NavBot v1.0.0',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
-              ),
             ),
           ],
         ),
@@ -1660,38 +954,20 @@ class _DashboardScreenState extends State<DashboardScreen>
         centerTitle: true,
         leading: Builder(
           builder: (context) => IconButton(
-            icon: const Icon(Icons.menu_rounded, color: Color(0xFF163A63)),
+            icon: const Icon(
+              Icons.menu_rounded,
+              color: Color(0xFF163A63),
+            ),
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        title: const Text('Dashboard',
-            style: TextStyle(
-                color: Color(0xFF163A63), fontWeight: FontWeight.w800)),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: GestureDetector(
-              onTap: () =>
-                  Navigator.pushReplacementNamed(context, '/dashboard'),
-              child: Hero(
-                tag: 'navbot_logo',
-                child: Container(
-                  width: 42,
-                  height: 42,
-                  padding: const EdgeInsets.all(5),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEAF4FF),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Image.asset(
-                    'navbot_app/assets/images/navbot_logo.png',
-                    fit: BoxFit.contain,
-                  ),
-                ),
-              ),
-            ),
+        title: const Text(
+          'Dashboard',
+          style: TextStyle(
+            color: Color(0xFF163A63),
+            fontWeight: FontWeight.w800,
           ),
-        ],
+        ),
       ),
       body: SafeArea(
         child: FadeTransition(
@@ -1703,11 +979,6 @@ class _DashboardScreenState extends State<DashboardScreen>
               children: [
                 _heroCard(),
                 const SizedBox(height: 18),
-                if (NavBotData.requestSent &&
-                    !NavBotData.deliveryCompleted) ...[
-                  _activeDeliveryBanner(),
-                  const SizedBox(height: 14),
-                ],
                 _actionTile(
                   title: 'Create Delivery',
                   subtitle: 'Generate a new delivery request',
@@ -1722,23 +993,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   icon: Icons.route_rounded,
                   colors: const [Color(0xFF1F4E8C), Color(0xFF355F9B)],
                   onTap: () => Navigator.pushNamed(context, '/tracking'),
-                  trailing:
-                      NavBotData.requestSent && !NavBotData.deliveryCompleted
-                          ? Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.2),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '${(NavBotData.progressValue * 100).toInt()}%',
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800),
-                              ),
-                            )
-                          : null,
                 ),
                 const SizedBox(height: 14),
                 _actionTile(
@@ -1750,49 +1004,41 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
                 const SizedBox(height: 14),
                 _actionTile(
-                  title: 'Stats & Overview',
-                  subtitle: 'Cards & grid view of delivery stats',
-                  icon: Icons.bar_chart_rounded,
-                  colors: const [Color(0xFF009688), Color(0xFF4CAF50)],
-                  onTap: () => Navigator.pushNamed(context, '/statsGrid'),
-                ),
-                const SizedBox(height: 14),
-                _actionTile(
-                  title: 'Robot Capabilities',
-                  subtitle: 'Sliver-based features & specs view',
-                  icon: Icons.precision_manufacturing_rounded,
-                  colors: const [Color(0xFF0288D1), Color(0xFF00BCD4)],
-                  onTap: () => Navigator.pushNamed(context, '/robotFeatures'),
+                  title: 'Lab 11 API Users',
+                  subtitle: 'Fetch users from API',
+                  icon: Icons.cloud_download_rounded,
+                  colors: const [Color(0xFFFF9800), Color(0xFFFFB74D)],
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ApiUsersScreen(),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
           ),
         ),
       ),
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SafeArea(
-            bottom: false,
-            child: TabBar(
-              controller: _tabController,
-              labelColor: const Color(0xFF1F4E8C),
-              unselectedLabelColor: Colors.grey,
-              indicatorColor: const Color(0xFF1F4E8C),
-              tabs: const [
-                Tab(icon: Icon(Icons.home_rounded), text: 'Home'),
-                Tab(icon: Icon(Icons.add_circle_outline_rounded), text: 'Add'),
-                Tab(icon: Icon(Icons.person_rounded), text: 'Profile'),
-              ],
-              onTap: _handleBottomNav,
-            ),
-          ),
-        ],
+      bottomNavigationBar: SafeArea(
+        child: TabBar(
+          controller: _tabController,
+          labelColor: const Color(0xFF1F4E8C),
+          unselectedLabelColor: Colors.grey,
+          indicatorColor: const Color(0xFF1F4E8C),
+          tabs: const [
+            Tab(icon: Icon(Icons.home_rounded), text: 'Home'),
+            Tab(icon: Icon(Icons.add_circle_outline_rounded), text: 'Add'),
+            Tab(icon: Icon(Icons.person_rounded), text: 'Profile'),
+          ],
+          onTap: _handleBottomNav,
+        ),
       ),
     );
   }
 }
-
 // ═════════════════════════════════════════════════════════════════════════════
 // CREATE DELIVERY SCREEN
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1843,9 +1089,6 @@ class _CreateDeliveryScreenState extends State<CreateDeliveryScreen>
     NavBotData.deliveryCompleted = false;
     NavBotData.progressValue = 0.0;
     NavBotData.progressNotifier.value = 0.0;
-    // FIX: Reset completionNotifier before starting so the TrackingScreen
-    // listener fires fresh for this new delivery.
-    NavBotData.completionNotifier.value = false;
     NavBotData.totalDeliveries += 1;
     NavBotData.startGlobalSimulation();
     NavBotStore.addNotification(
@@ -2038,10 +1281,6 @@ class _TrackingScreenState extends State<TrackingScreen>
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
 
-  // FIX: Guard flag ensures navigation to /deliveryComplete fires exactly once
-  // per delivery, even if the listener fires multiple times.
-  bool _hasNavigated = false;
-
   @override
   void initState() {
     super.initState();
@@ -2052,32 +1291,24 @@ class _TrackingScreenState extends State<TrackingScreen>
         CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
 
     NavBotData.progressNotifier.addListener(_onProgress);
-
-    // FIX: Listen to the public completionNotifier instead of using a private
-    // _tickCallback. This eliminates the tight coupling and ensures only
-    // TrackingScreen (the active screen) drives the final navigation.
-    NavBotData.completionNotifier.addListener(_onCompletion);
+    NavBotData._tickCallback = () {
+      if (mounted) {
+        Future.delayed(const Duration(milliseconds: 800), () {
+          if (mounted)
+            Navigator.pushReplacementNamed(context, '/deliveryComplete');
+        });
+      }
+    };
   }
 
   void _onProgress() {
     if (mounted) setState(() {});
   }
 
-  void _onCompletion() {
-    if (!NavBotData.completionNotifier.value) return;
-    if (_hasNavigated) return;
-    _hasNavigated = true;
-    Future.delayed(const Duration(milliseconds: 800), () {
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/deliveryComplete');
-      }
-    });
-  }
-
   @override
   void dispose() {
     NavBotData.progressNotifier.removeListener(_onProgress);
-    NavBotData.completionNotifier.removeListener(_onCompletion);
+    NavBotData._tickCallback = null;
     _pulseController.dispose();
     super.dispose();
   }
@@ -2295,9 +1526,7 @@ class _TrackingScreenState extends State<TrackingScreen>
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    // FIX: Wrap static method calls in closures so Flutter's
-                    // button system receives a proper VoidCallback.
-                    onPressed: () => NavBotData.stopSimulation(),
+                    onPressed: NavBotData.stopSimulation,
                     icon: const Icon(Icons.stop_circle_outlined),
                     label: const Padding(
                         padding: EdgeInsets.symmetric(vertical: 14),
@@ -2308,8 +1537,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                   const SizedBox(width: 12),
                   Expanded(
                     child: OutlinedButton.icon(
-                      // FIX: Same closure fix for resumeSimulation.
-                      onPressed: () => NavBotData.resumeSimulation(),
+                      onPressed: NavBotData.resumeSimulation,
                       icon: const Icon(Icons.play_arrow_rounded),
                       label: const Padding(
                           padding: EdgeInsets.symmetric(vertical: 14),
@@ -2554,6 +1782,7 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  // ── emoji list ────────────────────────────────────────────────────────────
   static const List<String> _emojis = [
     '😀',
     '😎',
@@ -2594,6 +1823,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
   }
 
+  // ── pick profile image from files ─────────────────────────────────────────
   Future<void> _pickProfileImage() async {
     final input = html.FileUploadInputElement();
     input.accept = 'image/*';
@@ -2607,6 +1837,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     NavBotSession.profileEmoji.value = null;
   }
 
+  // ── pick background image from files ─────────────────────────────────────
   Future<void> _pickBackgroundImage() async {
     final input = html.FileUploadInputElement();
     input.accept = 'image/*';
@@ -2619,6 +1850,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     NavBotSession.backgroundImageBytes.value = reader.result as Uint8List;
   }
 
+  // ── profile picture bottom sheet ──────────────────────────────────────────
   void _showProfileOptions() {
     showModalBottomSheet(
       context: context,
@@ -2632,6 +1864,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         maxChildSize: 0.85,
         builder: (context, scrollController) => Column(
           children: [
+            // handle
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: Container(
@@ -2646,6 +1879,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const Text('Profile Picture',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
             const SizedBox(height: 12),
+            // action tiles
             ListTile(
               leading: Container(
                 width: 44,
@@ -2701,6 +1935,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         color: Colors.black54)),
               ),
             ),
+            // emoji grid
             Expanded(
               child: GridView.builder(
                 controller: scrollController,
@@ -2746,6 +1981,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // ── background picture bottom sheet ───────────────────────────────────────
   void _showBackgroundOptions() {
     showModalBottomSheet(
       context: context,
@@ -2893,6 +2129,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            // ── Profile header card ─────────────────────────────────────────
             ValueListenableBuilder<Uint8List?>(
               valueListenable: NavBotSession.backgroundImageBytes,
               builder: (context, bgBytes, _) {
@@ -2921,6 +2158,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         padding: const EdgeInsets.all(22),
                         child: Column(
                           children: [
+                            // Profile picture
                             GestureDetector(
                               onTap: _showProfileOptions,
                               child: Stack(
@@ -3007,6 +2245,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ],
                         ),
                       ),
+                      // ── Change background button (top right) ───────────────
                       Positioned(
                         top: 12,
                         right: 12,
@@ -3222,10 +2461,6 @@ class HistoryScreen extends StatelessWidget {
     );
   }
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-// NOTIFICATIONS SCREEN
-// ═════════════════════════════════════════════════════════════════════════════
 
 class NotificationsScreen extends StatelessWidget {
   const NotificationsScreen({super.key});
@@ -3586,7 +2821,7 @@ class AboutScreen extends StatelessWidget {
               icon: Icons.bolt_rounded,
               title: 'Key Features',
               value:
-                  'Real-time tracking  •  Autonomous path planning  •  Live ETA updates  •  Multi-room delivery  •  Stop & Resume control  •  Delivery history logging',
+                  'Real-time tracking  •Autonomous path planning  •Live ETA updates  •Multi-room delivery  •Stop & Resume control  •Delivery history logging',
               color: Colors.orange,
             ),
             const SizedBox(height: 24),
@@ -3604,7 +2839,7 @@ class AboutScreen extends StatelessWidget {
               icon: Icons.group_rounded,
               title: 'Project Team — Group 3',
               value:
-                  'Zainab  •  Fizza  •  Danish  •  Hafiz Zain ul Abidin  •  Hammad Awan',
+                  'Zainab  •Fizza  •Danish  •Hafiz Zain ul Abidin  •Hammad Awan',
               color: Colors.green,
             ),
             const SizedBox(height: 12),
@@ -3741,720 +2976,6 @@ class AboutScreen extends StatelessWidget {
           ),
           Icon(Icons.arrow_forward_ios_rounded,
               color: Colors.grey.shade300, size: 16),
-        ],
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// LAB 10 — STATS GRID SCREEN
-// FIX: Converted to StatefulWidget so delivery stats refresh when the
-// screen is opened after a delivery completes. StatelessWidget was caching
-// stale values from NavBotData at build time with no way to rebuild.
-// ═════════════════════════════════════════════════════════════════════════════
-
-class StatsGridScreen extends StatefulWidget {
-  const StatsGridScreen({super.key});
-  @override
-  State<StatsGridScreen> createState() => _StatsGridScreenState();
-}
-
-class _StatsGridScreenState extends State<StatsGridScreen> {
-  @override
-  void initState() {
-    super.initState();
-    // FIX: Listen to progressNotifier so the grid updates live during delivery.
-    NavBotData.progressNotifier.addListener(_refresh);
-  }
-
-  void _refresh() {
-    if (mounted) setState(() {});
-  }
-
-  @override
-  void dispose() {
-    NavBotData.progressNotifier.removeListener(_refresh);
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Stat card data is now read fresh on every build, reflecting live values.
-    final List<Map<String, dynamic>> statCards = [
-      {
-        'icon': Icons.local_shipping_rounded,
-        'label': 'Total Deliveries',
-        'value': '${NavBotData.totalDeliveries}',
-        'color': const Color(0xFF1F4E8C),
-        'bg': const Color(0xFFEAF4FF),
-      },
-      {
-        'icon': Icons.check_circle_rounded,
-        'label': 'Completed',
-        'value': '${NavBotData.completedDeliveries}',
-        'color': Colors.green,
-        'bg': const Color(0xFFE8F5E9),
-      },
-      {
-        'icon': Icons.percent_rounded,
-        'label': 'Success Rate',
-        'value': NavBotData.totalDeliveries == 0
-            ? '0%'
-            : '${((NavBotData.completedDeliveries / NavBotData.totalDeliveries) * 100).toInt()}%',
-        'color': Colors.orange,
-        'bg': const Color(0xFFFFF3E0),
-      },
-      {
-        'icon': Icons.smart_toy_rounded,
-        'label': 'Robot Status',
-        'value': NavBotData.robotStatus,
-        'color': const Color(0xFF00BCD4),
-        'bg': const Color(0xFFE0F7FA),
-      },
-      {
-        'icon': Icons.place_rounded,
-        'label': 'Current Location',
-        'value': NavBotData.currentLocation,
-        'color': Colors.deepPurple,
-        'bg': const Color(0xFFEDE7F6),
-      },
-      {
-        'icon': Icons.timer_outlined,
-        'label': 'ETA',
-        'value': NavBotData.eta,
-        'color': Colors.red,
-        'bg': const Color(0xFFFFEBEE),
-      },
-    ];
-
-    final List<Map<String, dynamic>> featureCards = [
-      {
-        'icon': Icons.route_rounded,
-        'title': 'Path Planning',
-        'subtitle': 'Smart autonomous navigation',
-        'color': const Color(0xFF1F4E8C),
-      },
-      {
-        'icon': Icons.sensors_rounded,
-        'title': 'Live Sensors',
-        'subtitle': 'Real-time obstacle detection',
-        'color': const Color(0xFF00BCD4),
-      },
-      {
-        'icon': Icons.battery_charging_full_rounded,
-        'title': 'Auto Charge',
-        'subtitle': 'Returns when battery low',
-        'color': Colors.green,
-      },
-      {
-        'icon': Icons.wifi_rounded,
-        'title': 'WiFi Sync',
-        'subtitle': 'Instant app sync over network',
-        'color': Colors.orange,
-      },
-    ];
-
-    return Scaffold(
-      appBar:
-          buildNavBotAppBar(context, title: 'Stats & Overview', showBack: true),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            const Text(
-              'Live Robot Stats',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-                color: Color(0xFF163A63),
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Current delivery session overview',
-              style: TextStyle(color: Colors.black45, fontSize: 13),
-            ),
-            const SizedBox(height: 14),
-
-            // GridView.count — 2-column grid of stat Cards
-            GridView.count(
-              crossAxisCount: 2,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 1.1,
-              children: statCards.map((item) {
-                return Card(
-                  elevation: 3,
-                  clipBehavior: Clip.antiAlias,
-                  shadowColor: (item['color'] as Color).withValues(alpha: 0.18),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: item['bg'] as Color,
-                      border: Border.all(
-                        color: (item['color'] as Color).withValues(alpha: 0.2),
-                      ),
-                    ),
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: (item['color'] as Color)
-                                .withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(
-                            item['icon'] as IconData,
-                            color: item['color'] as Color,
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          item['value'] as String,
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            color: item['color'] as Color,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          item['label'] as String,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: Colors.black54,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-
-            const SizedBox(height: 22),
-
-            const Text(
-              'Robot Features',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-                color: Color(0xFF163A63),
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'What NavBot can do',
-              style: TextStyle(color: Colors.black45, fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-
-            // Horizontal ListView of feature Cards
-            // FIX 1: Height raised from 130→152 so Card elevation shadows
-            //        are not clipped by the SizedBox boundary.
-            // FIX 2: Replaced Spacer() with a fixed SizedBox(height:12).
-            //        Spacer() requires an unbounded flex axis, but inside a
-            //        horizontal ListView the cross-axis (height) is fixed —
-            //        Spacer() in that Column caused a "RenderFlex overflowed"
-            //        error at runtime. Using SizedBox gives predictable spacing.
-            // FIX 3: Added padding on the ListView so the first/last cards
-            //        are not flush with the screen edge.
-            SizedBox(
-              height: 152,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.fromLTRB(2, 2, 16, 4),
-                itemCount: featureCards.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
-                itemBuilder: (context, index) {
-                  final f = featureCards[index];
-                  return Card(
-                    elevation: 3,
-                    shadowColor: (f['color'] as Color).withValues(alpha: 0.2),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Container(
-                      width: 148,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            (f['color'] as Color).withValues(alpha: 0.08),
-                            Colors.white,
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              color:
-                                  (f['color'] as Color).withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(11),
-                            ),
-                            child: Icon(
-                              f['icon'] as IconData,
-                              color: f['color'] as Color,
-                              size: 20,
-                            ),
-                          ),
-                          const SizedBox(height: 12), // FIX: was Spacer()
-                          Text(
-                            f['title'] as String,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 13,
-                              color: Color(0xFF163A63),
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            f['subtitle'] as String,
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.black45,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-
-            const SizedBox(height: 22),
-
-            const Text(
-              'Recent Activity',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-                color: Color(0xFF163A63),
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Last completed deliveries',
-              style: TextStyle(color: Colors.black45, fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-
-            // ListView.builder with ListTile Cards
-            NavBotStore.history.isEmpty
-                ? Card(
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 28),
-                      child: Center(
-                        child: Column(
-                          children: [
-                            Icon(Icons.inbox_rounded,
-                                size: 40, color: Colors.black26),
-                            SizedBox(height: 8),
-                            Text('No recent activity',
-                                style: TextStyle(color: Colors.black38)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  )
-                : ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: NavBotStore.history.length > 5
-                        ? 5
-                        : NavBotStore.history.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final r = NavBotStore.history[index];
-                      return Card(
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 6),
-                          leading: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(13),
-                            ),
-                            child: const Icon(Icons.check_circle_rounded,
-                                color: Colors.green, size: 22),
-                          ),
-                          title: Text(
-                            '${r.from}  →  ${r.to}',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 14,
-                              color: Color(0xFF163A63),
-                            ),
-                          ),
-                          subtitle: Text(
-                            r.package.isEmpty ? 'No details' : r.package,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          trailing: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 9, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Text(
-                              'Done',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.green,
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// LAB 10 — ROBOT FEATURES SCREEN
-// Demonstrates: SliverAppBar, SliverGrid, SliverList, SliverToBoxAdapter,
-//               CustomScrollView
-// ═════════════════════════════════════════════════════════════════════════════
-
-class RobotFeaturesScreen extends StatelessWidget {
-  const RobotFeaturesScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final List<Map<String, dynamic>> capabilities = [
-      {
-        'icon': Icons.radar_rounded,
-        'label': 'Obstacle\nDetection',
-        'color': const Color(0xFF1F4E8C)
-      },
-      {
-        'icon': Icons.map_rounded,
-        'label': 'Map\nBuilding',
-        'color': const Color(0xFF00BCD4)
-      },
-      {
-        'icon': Icons.speed_rounded,
-        'label': 'Speed\nControl',
-        'color': Colors.orange
-      },
-      {
-        'icon': Icons.battery_full_rounded,
-        'label': 'Battery\nMonitor',
-        'color': Colors.green
-      },
-      {
-        'icon': Icons.wifi_rounded,
-        'label': 'WiFi\nControl',
-        'color': Colors.deepPurple
-      },
-      {
-        'icon': Icons.notifications_active_rounded,
-        'label': 'Push\nAlerts',
-        'color': Colors.red
-      },
-      {
-        'icon': Icons.history_rounded,
-        'label': 'Trip\nHistory',
-        'color': Colors.teal
-      },
-      {
-        'icon': Icons.lock_rounded,
-        'label': 'Secure\nAccess',
-        'color': Colors.brown
-      },
-    ];
-
-    final List<Map<String, String>> specs = [
-      {'label': 'Drive System', 'value': 'Differential Drive (2WD)'},
-      {'label': 'Sensors', 'value': 'Ultrasonic + IR + Camera'},
-      {'label': 'Navigation', 'value': 'A* Pathfinding Algorithm'},
-      {'label': 'Connectivity', 'value': 'WiFi 802.11 b/g/n'},
-      {'label': 'Payload', 'value': 'Up to 2 kg'},
-      {'label': 'Battery', 'value': 'Li-Ion 5000mAh'},
-      {'label': 'Framework', 'value': 'Flutter (Cross-platform)'},
-      {'label': 'Version', 'value': 'NavBot v1.0.0'},
-    ];
-
-    return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          // SliverAppBar — collapsing hero header
-          SliverAppBar(
-            expandedHeight: 200,
-            pinned: true,
-            backgroundColor: const Color(0xFF1F4E8C),
-            surfaceTintColor: Colors.transparent,
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-              onPressed: () => Navigator.pop(context),
-            ),
-            flexibleSpace: FlexibleSpaceBar(
-              centerTitle: true,
-              title: const Text(
-                'Robot Capabilities',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16,
-                ),
-              ),
-              background: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Color(0xFF1F4E8C), Color(0xFF00BCD4)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-                child: const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SizedBox(height: 20),
-                      Icon(Icons.smart_toy_rounded,
-                          color: Colors.white, size: 64),
-                      SizedBox(height: 8),
-                      Text(
-                        'NavBot — Autonomous Delivery Robot',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // SliverToBoxAdapter — section title
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(16, 20, 16, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Core Capabilities',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                      color: Color(0xFF163A63),
-                    ),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'What powers NavBot under the hood',
-                    style: TextStyle(color: Colors.black45, fontSize: 13),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // SliverGrid — 4-column capability icon cards
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            sliver: SliverGrid(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final c = capabilities[index];
-                  return Card(
-                    elevation: 3,
-                    shadowColor: (c['color'] as Color).withValues(alpha: 0.2),
-                    // FIX: clipBehavior ensures the Container's BoxDecoration
-                    // (color + border) is clipped to the Card's rounded shape.
-                    // Without this, the decoration renders as a square over
-                    // the Card's rounded corners.
-                    clipBehavior: Clip.antiAlias,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: (c['color'] as Color).withValues(alpha: 0.06),
-                        border: Border.all(
-                          color: (c['color'] as Color).withValues(alpha: 0.2),
-                        ),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          // FIX: Reduced icon container from 48→36 so it fits
-                          // inside the narrower 4-column grid cells without
-                          // overflowing. The card is ~(screenWidth-32-30)/4
-                          // wide (~75-80px on a typical phone).
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color:
-                                  (c['color'] as Color).withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Icon(
-                              c['icon'] as IconData,
-                              color: c['color'] as Color,
-                              size: 20, // FIX: reduced from 26→20
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: Text(
-                              c['label'] as String,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 10, // FIX: reduced from 12→10
-                                color: c['color'] as Color,
-                                height: 1.3,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-                childCount: capabilities.length,
-              ),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 4,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-                childAspectRatio: 0.85, // FIX: was 0.9 — slightly taller cells
-              ),
-            ),
-          ),
-
-          // SliverToBoxAdapter — tech specs section title
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(16, 24, 16, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Technical Specifications',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                      color: Color(0xFF163A63),
-                    ),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Hardware and software details',
-                    style: TextStyle(color: Colors.black45, fontSize: 13),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // SliverList — tech specs as ListTile Cards
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 30),
-            sliver: SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final s = specs[index];
-                  final isLast = index == specs.length - 1;
-                  return Card(
-                    elevation: 2,
-                    margin: EdgeInsets.only(bottom: isLast ? 0 : 8),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 4),
-                      leading: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEAF4FF),
-                          borderRadius: BorderRadius.circular(11),
-                        ),
-                        child: const Icon(
-                          Icons.memory_rounded,
-                          color: Color(0xFF1F4E8C),
-                          size: 20,
-                        ),
-                      ),
-                      title: Text(
-                        s['label']!,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                          color: Colors.black54,
-                        ),
-                      ),
-                      trailing: Text(
-                        s['value']!,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 13,
-                          color: Color(0xFF163A63),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-                childCount: specs.length,
-              ),
-            ),
-          ),
         ],
       ),
     );
